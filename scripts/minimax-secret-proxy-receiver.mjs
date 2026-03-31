@@ -76,8 +76,8 @@ const server = createServer(async (req, res) => {
   }
   console.log("=============================================================\n");
 
-  // pi-ai's Anthropic provider always uses streaming (`client.messages.stream(...)`)
-  // regardless of payload.stream, so we respond with Anthropic SSE events.
+  // Respond with Anthropic-style SSE events so that the upstream Anthropic JS client
+  // (used by pi-ai's streaming provider) sees a normal streaming response.
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache",
@@ -88,16 +88,14 @@ const server = createServer(async (req, res) => {
   const messageId = `msg_${Date.now()}`;
   const contentText = "ok (captured by local secret proxy receiver)";
 
-  console.log("responding with anthropic SSE events");
+  console.log("responding with anthropic-style SSE events");
 
   const writeEvent = (eventName, obj) => {
-    // Anthropic streams over SSE; many clients accept data-only events, but
-    // include explicit event names for maximum compatibility.
     res.write(`event: ${eventName}\n`);
     res.write(`data: ${JSON.stringify(obj)}\n\n`);
   };
 
-  // Minimal Anthropic SSE sequence.
+  // Minimal Anthropic SSE message lifecycle.
   writeEvent("message_start", {
     type: "message_start",
     message: {

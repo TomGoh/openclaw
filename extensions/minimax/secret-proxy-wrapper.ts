@@ -3,11 +3,7 @@
 // 本文件不是重新实现整套推理流程，而是包一层 wrapper，在发请求前，把请求体改写成 secret proxy 期望的格式。
 
 import type { StreamFn } from "@mariozechner/pi-agent-core";
-import {
-  completeSimple,
-  createAssistantMessageEventStream,
-  streamSimple,
-} from "@mariozechner/pi-ai"; // 真正发 HTTP 请求的函数
+import { streamSimple } from "@mariozechner/pi-ai"; // 真正发 HTTP 请求的函数
 
 /** 启用 secret proxy 时传给 pi-ai / Anthropic SDK 的 apiKey，避免真实 MiniMax 密钥出现在发往 CA 的 HTTP（如 X-Api-Key）中；由 TA 按 key_id 注入真密钥。 */
 export const MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER = "openclaw-minimax-secret-proxy";
@@ -124,10 +120,6 @@ export function createMinimaxSecretProxyWrapper(params: {
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
           return onPayloadResult;
         }
-        // TA protocol is non-streaming (buffers full response), so force non-streaming requests.
-        if ("stream" in payload && (payload as Record<string, unknown>).stream === true) {
-          (payload as Record<string, unknown>).stream = false;
-        }
         const payloadJson = JSON.stringify(payload);
         const proxyRequest: SecretProxyRequest = {
           key_id: keyId,
@@ -144,51 +136,7 @@ export function createMinimaxSecretProxyWrapper(params: {
       },
     } as const;
 
-    // `StreamFn` must return an AssistantMessageEventStream. The default `streamSimple`
-    // expects SSE-style chunked responses; secret proxy backends commonly return a
-    // buffered body. Use `completeSimple` and adapt it to an event stream.
-    const eventStream = createAssistantMessageEventStream();
-    void (async () => {
-      try {
-        const message = await completeSimple(
-          proxyModel as never,
-          context as never,
-          proxyOptions as never,
-        );
-        eventStream.push({ type: "start", partial: message });
-        const reason =
-          message.stopReason === "stop" ||
-          message.stopReason === "length" ||
-          message.stopReason === "toolUse"
-            ? message.stopReason
-            : "stop";
-        eventStream.push({ type: "done", reason, message });
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        const now = Date.now();
-        const usage = {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 0,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        };
-        const errorAssistantMessage = {
-          role: "assistant" as const,
-          content: [{ type: "text" as const, text: "" }],
-          api: (proxyModel as Record<string, unknown>).api as never,
-          provider: (proxyModel as Record<string, unknown>).provider as never,
-          model: (proxyModel as Record<string, unknown>).id as never,
-          usage,
-          stopReason: "error" as const,
-          errorMessage,
-          timestamp: now,
-        };
-        eventStream.push({ type: "start", partial: errorAssistantMessage });
-        eventStream.push({ type: "error", reason: "error", error: errorAssistantMessage });
-      }
-    })();
-    return eventStream;
+    // 直接走流式 `streamSimple`，由下游（TA / secret proxy）按 SSE 协议返回分块。
+    return underlying(proxyModel as never, context as never, proxyOptions as never);
   };
 }
