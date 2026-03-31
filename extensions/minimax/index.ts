@@ -27,6 +27,7 @@ import {
 import type { MiniMaxRegion } from "./oauth.js";
 import { applyMinimaxApiConfig, applyMinimaxApiConfigCn } from "./onboard.js";
 import { buildMinimaxPortalProvider, buildMinimaxProvider } from "./provider-catalog.js";
+import { createMinimaxSecretProxyWrapper } from "./secret-proxy-wrapper.js";
 
 const API_PROVIDER_ID = "minimax";
 const PORTAL_PROVIDER_ID = "minimax-portal";
@@ -230,6 +231,11 @@ export default definePluginEntry({
         });
         return apiKey ? { token: apiKey } : null;
       },
+      wrapStreamFn: (ctx) =>
+        createMinimaxSecretProxyWrapper({
+          baseStreamFn: ctx.streamFn,
+          extraParams: ctx.extraParams,
+        }),
       isModernModelRef: ({ modelId }) => isMiniMaxModernModelId(modelId),
       fetchUsageSnapshot: async (ctx) =>
         await fetchMinimaxUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn),
@@ -278,6 +284,11 @@ export default definePluginEntry({
           run: createOAuthHandler("cn"),
         },
       ],
+      wrapStreamFn: (ctx) =>
+        createMinimaxSecretProxyWrapper({
+          baseStreamFn: ctx.streamFn,
+          extraParams: ctx.extraParams,
+        }),
       isModernModelRef: ({ modelId }) => isMiniMaxModernModelId(modelId),
     });
     api.registerImageGenerationProvider(buildMinimaxImageGenerationProvider());
