@@ -9,9 +9,11 @@ import type { WizardPrompter } from "../wizard/prompts.js";
 import { promptAuthChoiceGrouped } from "./auth-choice-prompt.js";
 import { applyAuthChoice, resolvePreferredProviderForAuthChoice } from "./auth-choice.js";
 import {
+  applyMinimaxSecretProxyTripleToMinimaxModels,
   applyModelAllowlist,
   applyModelFallbacksFromSelection,
   applyPrimaryModel,
+  extractMinimaxSecretProxyTriple,
   promptDefaultModel,
   promptModelAllowlist,
 } from "./model-picker.js";
@@ -149,6 +151,7 @@ export async function promptAuthConfig(
   }
 
   if (authChoice !== "custom-api-key") {
+    const minimaxSecretProxyDonor = extractMinimaxSecretProxyTriple(next);
     const modelAllowlist = resolveProviderChoiceModelAllowlist({
       authChoice,
       config: next,
@@ -165,6 +168,9 @@ export async function promptAuthConfig(
     });
     if (allowlistSelection.models) {
       next = applyModelAllowlist(next, allowlistSelection.models);
+      if (minimaxSecretProxyDonor) {
+        next = applyMinimaxSecretProxyTripleToMinimaxModels(next, minimaxSecretProxyDonor);
+      }
       next = applyModelFallbacksFromSelection(next, allowlistSelection.models);
     }
   }

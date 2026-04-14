@@ -72,4 +72,52 @@ describe("minimax secret proxy wrapper", () => {
       messages: [{ role: "user", content: "hello" }],
     });
   });
+
+  it("inherits secret proxy settings from minimax default model when extraParams omit them", () => {
+    const capture: { payload?: Record<string, unknown> } = {};
+    const baseStreamFn: StreamFn = (model, _context, options) => {
+      const payload = {
+        model: "MiniMax-M2.5",
+        messages: [{ role: "user", content: "hello" }],
+      } as Record<string, unknown>;
+      options?.onPayload?.(payload, model);
+      capture.payload = payload;
+      return {} as never;
+    };
+
+    const wrapped = createMinimaxSecretProxyWrapper({
+      baseStreamFn,
+      extraParams: { temperature: 0.2 },
+      config: {
+        agents: {
+          defaults: {
+            models: {
+              "minimax/MiniMax-M2.7": {
+                params: {
+                  secretProxyUrl: "http://127.0.0.1:18790",
+                  secretProxyKeyId: 0,
+                  secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+                },
+              },
+            },
+          },
+        },
+      } as never,
+    });
+
+    wrapped(
+      {
+        provider: "minimax",
+        id: "MiniMax-M2.5",
+        api: "anthropic-messages",
+        baseUrl: "https://api.minimaxi.com/anthropic",
+        headers: {},
+      } as never,
+      {} as never,
+      { apiKey: "x" } as never,
+    );
+
+    expect(capture.payload?.key_id).toBe(0);
+    expect(capture.payload?.endpoint_url).toBe("https://api.minimaxi.com/anthropic/v1/messages");
+  });
 });

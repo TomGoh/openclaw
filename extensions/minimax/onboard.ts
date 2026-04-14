@@ -1,3 +1,4 @@
+import { MINIMAX_DEFAULT_MODEL_ID } from "openclaw/plugin-sdk/provider-models";
 import {
   applyAgentDefaultModelPrimary,
   applyOnboardAuthAgentModelsAndProviders,
@@ -9,6 +10,7 @@ import {
   MINIMAX_API_BASE_URL,
   MINIMAX_CN_API_BASE_URL,
 } from "./model-definitions.js";
+import { MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER } from "./secret-proxy-wrapper.js";
 
 type MinimaxApiProviderConfigParams = {
   providerId: string;
@@ -100,5 +102,70 @@ export function applyMinimaxApiConfigCn(
     providerId: "minimax",
     modelId,
     baseUrl: MINIMAX_CN_API_BASE_URL,
+  });
+}
+
+/**
+ * After {@link applyMinimaxApiConfig} / {@link applyMinimaxApiConfigCn}, force placeholder
+ * `apiKey` and agent `params.secretProxy*` for TEE / secret proxy (Plan B).
+ */
+export function buildMinimaxTeeSecretProxyConfigPatch(
+  cfg: OpenClawConfig,
+  params: {
+    region: "global" | "cn";
+    secretProxyUrl: string;
+    secretProxyKeyId: number;
+  },
+): OpenClawConfig {
+  const modelId = MINIMAX_DEFAULT_MODEL_ID;
+  const baseCfg =
+    params.region === "cn"
+      ? applyMinimaxApiConfigCn(cfg, modelId)
+      : applyMinimaxApiConfig(cfg, modelId);
+  const baseUrl = params.region === "cn" ? MINIMAX_CN_API_BASE_URL : MINIMAX_API_BASE_URL;
+  const secretProxyEndpointUrl = `${baseUrl.replace(/\/+$/, "")}/v1/messages`;
+
+  const providerId = "minimax";
+  const modelRef = `${providerId}/${modelId}`;
+
+  const providers = {
+    ...(baseCfg.models?.providers ?? {}),
+  } as Record<string, ModelProviderConfig>;
+  const prevProvider = providers[providerId] ?? {};
+  providers[providerId] = {
+    ...prevProvider,
+    apiKey: MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER,
+  };
+
+  const models = { ...(baseCfg.agents?.defaults?.models ?? {}) };
+  const proxyParams = {
+    secretProxyUrl: params.secretProxyUrl,
+    secretProxyKeyId: params.secretProxyKeyId,
+    secretProxyEndpointUrl,
+  };
+  const minimaxRefs = new Set<string>([
+    modelRef,
+    ...Object.keys(models).filter((key) => key.startsWith("minimax/")),
+  ]);
+  for (const refKey of minimaxRefs) {
+    const prevEntry = models[refKey] ?? {};
+    const prevParams =
+      typeof prevEntry.params === "object" &&
+      prevEntry.params !== null &&
+      !Array.isArray(prevEntry.params)
+        ? (prevEntry.params as Record<string, unknown>)
+        : {};
+    models[refKey] = {
+      ...prevEntry,
+      params: {
+        ...prevParams,
+        ...proxyParams,
+      },
+    };
+  }
+
+  return applyOnboardAuthAgentModelsAndProviders(baseCfg, {
+    agentModels: models,
+    providers,
   });
 }

@@ -574,6 +574,89 @@ export function applyModelAllowlist(cfg: OpenClawConfig, models: string[]): Open
   };
 }
 
+/**
+ * MiniMax TEE / secret-proxy: read `secretProxy*` from any `minimax/*` agent model entry.
+ * Used before the configure allowlist step so proxy metadata is not lost when the allowlist
+ * drops refs that only existed as the default-model row.
+ */
+export function extractMinimaxSecretProxyTriple(
+  cfg: OpenClawConfig,
+): Record<string, unknown> | undefined {
+  const models = cfg.agents?.defaults?.models;
+  if (!models || typeof models !== "object") {
+    return undefined;
+  }
+  for (const key of Object.keys(models)) {
+    if (!key.startsWith("minimax/")) {
+      continue;
+    }
+    const raw = models[key]?.params;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      continue;
+    }
+    const p = raw;
+    if (typeof p.secretProxyUrl === "string" && p.secretProxyUrl.trim()) {
+      const triple: Record<string, unknown> = {
+        secretProxyUrl: p.secretProxyUrl.trim(),
+      };
+      if (p.secretProxyKeyId !== undefined) {
+        triple.secretProxyKeyId = p.secretProxyKeyId;
+      }
+      if (typeof p.secretProxyEndpointUrl === "string" && p.secretProxyEndpointUrl.trim()) {
+        triple.secretProxyEndpointUrl = p.secretProxyEndpointUrl.trim();
+      }
+      return triple;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Apply one `secretProxy*` triple to every `minimax/*` key in `agents.defaults.models`
+ * (configure model-picker multi-select). Unifies TEE-injected metadata across selected refs.
+ */
+export function applyMinimaxSecretProxyTripleToMinimaxModels(
+  cfg: OpenClawConfig,
+  triple: Record<string, unknown>,
+): OpenClawConfig {
+  const defaults = cfg.agents?.defaults;
+  const models = defaults?.models;
+  if (!models || typeof models !== "object") {
+    return cfg;
+  }
+  const minimaxKeys = Object.keys(models).filter((key) => key.startsWith("minimax/"));
+  if (minimaxKeys.length === 0) {
+    return cfg;
+  }
+  const nextModels = { ...models };
+  for (const key of minimaxKeys) {
+    const prevEntry = nextModels[key] ?? {};
+    const prevParams =
+      typeof prevEntry.params === "object" &&
+      prevEntry.params !== null &&
+      !Array.isArray(prevEntry.params)
+        ? { ...prevEntry.params }
+        : {};
+    nextModels[key] = {
+      ...prevEntry,
+      params: {
+        ...prevParams,
+        ...triple,
+      },
+    };
+  }
+  return {
+    ...cfg,
+    agents: {
+      ...cfg.agents,
+      defaults: {
+        ...defaults,
+        models: nextModels,
+      },
+    },
+  };
+}
+
 export function applyModelFallbacksFromSelection(
   cfg: OpenClawConfig,
   selection: string[],

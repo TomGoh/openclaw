@@ -1,6 +1,7 @@
 import {
   definePluginEntry,
   type ProviderAuthContext,
+  type ProviderAuthMethod,
   type ProviderAuthResult,
   type ProviderCatalogContext,
 } from "openclaw/plugin-sdk/plugin-entry";
@@ -25,9 +26,17 @@ import {
   minimaxPortalMediaUnderstandingProvider,
 } from "./media-understanding-provider.js";
 import type { MiniMaxRegion } from "./oauth.js";
-import { applyMinimaxApiConfig, applyMinimaxApiConfigCn } from "./onboard.js";
+import {
+  applyMinimaxApiConfig,
+  applyMinimaxApiConfigCn,
+  buildMinimaxTeeSecretProxyConfigPatch,
+} from "./onboard.js";
 import { buildMinimaxPortalProvider, buildMinimaxProvider } from "./provider-catalog.js";
-import { createMinimaxSecretProxyWrapper } from "./secret-proxy-wrapper.js";
+import {
+  createMinimaxSecretProxyWrapper,
+  MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER,
+} from "./secret-proxy-wrapper.js";
+import { provisionKeyViaCa } from "./tee-ca-admin.js";
 
 const API_PROVIDER_ID = "minimax";
 const PORTAL_PROVIDER_ID = "minimax-portal";
@@ -91,6 +100,117 @@ function resolvePortalCatalog(ctx: ProviderCatalogContext) {
       baseUrl: explicitBaseUrl || DEFAULT_BASE_URL_GLOBAL,
       apiKey,
     }),
+  };
+}
+
+const CA_ADMIN_TOKEN_ENV = "SECRET_PROXY_CA_ADMIN_TOKEN";
+
+/** Matches `scripts/start-crosvm-tee*.sh` dev default; override via env or at prompt for production. */
+const DEFAULT_SECRET_PROXY_CA_ADMIN_TOKEN = "dev-admin-token-change-me-please-0001";
+
+function createTeeSecretProxyAuthMethod(region: MiniMaxRegion): ProviderAuthMethod {
+  const regionLabel = region === "cn" ? "CN" : "Global";
+  const isCn = region === "cn";
+  return {
+    id: isCn ? "api-tee-cn" : "api-tee-global",
+    label: `MiniMax via TEE / Secret Proxy (${regionLabel})`,
+    hint: `Provision API key into TA via CA (${regionLabel})`,
+    kind: "custom",
+    wizard: {
+      choiceId: isCn ? "minimax-cn-tee" : "minimax-global-tee",
+      choiceLabel: `MiniMax TEE / Secret Proxy (${regionLabel})`,
+      choiceHint: "Key stays in TEE; OpenClaw stores proxy metadata only",
+      groupId: "minimax",
+      groupLabel: "MiniMax",
+      groupHint: "M2.7 (recommended)",
+    },
+    run: async (ctx: ProviderAuthContext): Promise<ProviderAuthResult> => {
+      const envProxy = process.env.OPENCLAW_MINIMAX_SECRET_PROXY_URL?.trim();
+      const caBaseRaw = await ctx.prompter.text({
+        message: "Secret proxy CA base URL (where secret_proxy_ca serve listens)",
+        initialValue: envProxy ?? "http://127.0.0.1:19030",
+        validate: (value) => {
+          const v = value.trim();
+          if (!v) {
+            return "URL required";
+          }
+          try {
+            new URL(v);
+          } catch {
+            return "Invalid URL";
+          }
+          return undefined;
+        },
+      });
+      const caBaseUrl = caBaseRaw.trim();
+
+      const envToken =
+        process.env.SECRET_PROXY_CA_ADMIN_TOKEN?.trim() ||
+        process.env.OPENCLAW_SECRET_PROXY_CA_ADMIN_TOKEN?.trim();
+      const adminToken = await ctx.prompter.text({
+        message: `Admin token (must match ${CA_ADMIN_TOKEN_ENV} on the CA host)`,
+        initialValue: envToken ?? DEFAULT_SECRET_PROXY_CA_ADMIN_TOKEN,
+        validate: (value) => (!value.trim() ? "Token required" : undefined),
+      });
+
+      const slotStr = await ctx.prompter.text({
+        message: "TEE key slot index",
+        initialValue: "0",
+        validate: (value) => {
+          const n = Number.parseInt(value.trim(), 10);
+          if (!Number.isFinite(n) || n < 0) {
+            return "Enter a non-negative integer";
+          }
+          return undefined;
+        },
+      });
+      const slot = Number.parseInt(slotStr.trim(), 10);
+      const auditRequestId = `minimax-configure-${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2, 10)}`;
+
+      const apiKey = await ctx.prompter.text({
+        message: "MiniMax API key (sk-api- or sk-cp-)",
+        validate: (value) => (!value.trim() ? "API key required" : undefined),
+      });
+
+      await provisionKeyViaCa({
+        caBaseUrl,
+        adminToken: adminToken.trim(),
+        slot,
+        key: apiKey.trim(),
+        provider: "minimax",
+        actor: "openclaw-configure",
+        requestId: auditRequestId,
+      });
+
+      const secretProxyUrl = caBaseUrl.replace(/\/+$/, "");
+      const configPatch = buildMinimaxTeeSecretProxyConfigPatch(ctx.config, {
+        region: isCn ? "cn" : "global",
+        secretProxyUrl,
+        secretProxyKeyId: slot,
+      });
+
+      return {
+        profiles: [
+          {
+            profileId: isCn ? "minimax:tee-cn" : "minimax:tee-global",
+            credential: {
+              type: "api_key",
+              provider: API_PROVIDER_ID,
+              key: MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER,
+            },
+          },
+        ],
+        configPatch,
+        defaultModel: apiModelRef(DEFAULT_MODEL),
+        notes: [
+          "The API key was provisioned into the TEE via the CA; OpenClaw only stores a placeholder locally.",
+          `Keep secret_proxy_ca serve running; set ${CA_ADMIN_TOKEN_ENV} on the CA host to protect admin routes.`,
+        ],
+      };
+    },
+    runNonInteractive: async () => null,
   };
 }
 
@@ -220,6 +340,8 @@ export default definePluginEntry({
             groupHint: "M2.7 (recommended)",
           },
         }),
+        createTeeSecretProxyAuthMethod("global"),
+        createTeeSecretProxyAuthMethod("cn"),
       ],
       catalog: {
         order: "simple",
@@ -235,6 +357,7 @@ export default definePluginEntry({
         createMinimaxSecretProxyWrapper({
           baseStreamFn: ctx.streamFn,
           extraParams: ctx.extraParams,
+          config: ctx.config,
         }),
       isModernModelRef: ({ modelId }) => isMiniMaxModernModelId(modelId),
       fetchUsageSnapshot: async (ctx) =>
@@ -288,6 +411,7 @@ export default definePluginEntry({
         createMinimaxSecretProxyWrapper({
           baseStreamFn: ctx.streamFn,
           extraParams: ctx.extraParams,
+          config: ctx.config,
         }),
       isModernModelRef: ({ modelId }) => isMiniMaxModernModelId(modelId),
     });

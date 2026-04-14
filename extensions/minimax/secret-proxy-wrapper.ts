@@ -4,6 +4,8 @@
 
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai"; // 真正发 HTTP 请求的函数
+import { MINIMAX_DEFAULT_MODEL_ID } from "openclaw/plugin-sdk/provider-models";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/provider-onboard";
 
 /** 启用 secret proxy 时传给 pi-ai / Anthropic SDK 的 apiKey，避免真实 MiniMax 密钥出现在发往 CA 的 HTTP（如 X-Api-Key）中；由 TA 按 key_id 注入真密钥。 */
 export const MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER = "openclaw-minimax-secret-proxy";
@@ -95,20 +97,86 @@ function toHeaderMap(headers: unknown): Record<string, string> {
   return mapped;
 }
 
+/** TEE onboarding only attaches secretProxy* to the default model ref; copy from there for other minimax/* models. */
+function extractSecretProxyTripleFromParams(
+  raw: Record<string, unknown> | undefined,
+): Partial<Record<"secretProxyUrl" | "secretProxyKeyId" | "secretProxyEndpointUrl", unknown>> {
+  if (!raw) {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  if (typeof raw.secretProxyUrl === "string" && raw.secretProxyUrl.trim()) {
+    out.secretProxyUrl = raw.secretProxyUrl.trim();
+  }
+  if (raw.secretProxyKeyId !== undefined) {
+    out.secretProxyKeyId = raw.secretProxyKeyId;
+  }
+  if (typeof raw.secretProxyEndpointUrl === "string" && raw.secretProxyEndpointUrl.trim()) {
+    out.secretProxyEndpointUrl = raw.secretProxyEndpointUrl.trim();
+  }
+  return out;
+}
+
+function resolveSecretProxyFallbackFromConfig(
+  config: OpenClawConfig | undefined,
+): Record<string, unknown> {
+  const models = config?.agents?.defaults?.models;
+  if (!models || typeof models !== "object") {
+    return {};
+  }
+  const preferred = models[`minimax/${MINIMAX_DEFAULT_MODEL_ID}`]?.params;
+  if (preferred && typeof preferred === "object" && !Array.isArray(preferred)) {
+    const triple = extractSecretProxyTripleFromParams(preferred as Record<string, unknown>);
+    if (triple.secretProxyUrl) {
+      return { ...triple };
+    }
+  }
+  for (const [key, entry] of Object.entries(models)) {
+    if (!key.startsWith("minimax/")) {
+      continue;
+    }
+    const p = entry?.params;
+    if (!p || typeof p !== "object" || Array.isArray(p)) {
+      continue;
+    }
+    const triple = extractSecretProxyTripleFromParams(p as Record<string, unknown>);
+    if (triple.secretProxyUrl) {
+      return { ...triple };
+    }
+  }
+  return {};
+}
+
+function mergeExtraParamsWithSecretProxyFallback(
+  extraParams: Record<string, unknown> | undefined,
+  config: OpenClawConfig | undefined,
+): Record<string, unknown> | undefined {
+  const fallback = resolveSecretProxyFallbackFromConfig(config);
+  if (Object.keys(fallback).length === 0) {
+    return extraParams;
+  }
+  return {
+    ...fallback,
+    ...(extraParams ?? {}),
+  };
+}
+
 export function createMinimaxSecretProxyWrapper(params: {
   baseStreamFn?: StreamFn;
   extraParams?: Record<string, unknown>;
+  config?: OpenClawConfig;
 }): StreamFn {
+  const mergedParams = mergeExtraParamsWithSecretProxyFallback(params.extraParams, params.config);
   const underlying = params.baseStreamFn ?? streamSimple;
-  const secretProxyUrl = resolveSecretProxyUrl(params.extraParams);
+  const secretProxyUrl = resolveSecretProxyUrl(mergedParams);
   if (!secretProxyUrl) {
     return underlying;
   }
 
   return (model, context, options) => {
     const originModelBaseUrl = model.baseUrl;
-    const endpointUrl = resolveEndpointUrl(originModelBaseUrl, params.extraParams);
-    const keyId = resolveSecretProxyKeyId(params.extraParams);
+    const endpointUrl = resolveEndpointUrl(originModelBaseUrl, mergedParams);
+    const keyId = resolveSecretProxyKeyId(mergedParams);
     const originalOnPayload = options?.onPayload;
 
     const proxyModel = { ...model, baseUrl: secretProxyUrl };

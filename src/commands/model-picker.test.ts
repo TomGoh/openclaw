@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
+  applyMinimaxSecretProxyTripleToMinimaxModels,
   applyModelAllowlist,
   applyModelFallbacksFromSelection,
+  extractMinimaxSecretProxyTriple,
   promptDefaultModel,
   promptModelAllowlist,
 } from "./model-picker.js";
@@ -283,6 +285,65 @@ describe("applyModelAllowlist", () => {
 
     const next = applyModelAllowlist(config, []);
     expect(next.agents?.defaults?.models).toBeUndefined();
+  });
+});
+
+describe("MiniMax secret proxy + model allowlist", () => {
+  it("extracts secretProxy* from any minimax/* entry", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "minimax/MiniMax-M2.7": {
+              params: {
+                secretProxyUrl: "http://127.0.0.1:19030",
+                secretProxyKeyId: 0,
+                secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    expect(extractMinimaxSecretProxyTriple(cfg)).toEqual({
+      secretProxyUrl: "http://127.0.0.1:19030",
+      secretProxyKeyId: 0,
+      secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+    });
+  });
+
+  it("after allowlist keeps only selected refs, reapplies donor onto every minimax/* key", () => {
+    const donor = {
+      secretProxyUrl: "http://127.0.0.1:19030",
+      secretProxyKeyId: 1,
+      secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+    };
+    const afterAuth = {
+      agents: {
+        defaults: {
+          models: {
+            "minimax/MiniMax-M2.7": { params: { ...donor } },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const triple = extractMinimaxSecretProxyTriple(afterAuth);
+    expect(triple).toEqual(donor);
+
+    const afterAllowlist = applyModelAllowlist(afterAuth, [
+      "minimax/MiniMax-M2.5",
+      "minimax/MiniMax-M2.7",
+    ]);
+    expect(afterAllowlist.agents?.defaults?.models?.["minimax/MiniMax-M2.7"]?.params).toEqual(
+      donor,
+    );
+    expect(
+      afterAllowlist.agents?.defaults?.models?.["minimax/MiniMax-M2.5"]?.params,
+    ).toBeUndefined();
+
+    const merged = applyMinimaxSecretProxyTripleToMinimaxModels(afterAllowlist, triple!);
+    expect(merged.agents?.defaults?.models?.["minimax/MiniMax-M2.5"]?.params).toEqual(donor);
+    expect(merged.agents?.defaults?.models?.["minimax/MiniMax-M2.7"]?.params).toEqual(donor);
   });
 });
 
