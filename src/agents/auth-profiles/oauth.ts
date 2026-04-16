@@ -13,6 +13,7 @@ import {
 } from "../../plugins/provider-runtime.runtime.js";
 import { resolveSecretRefString, type SecretRefResolveCache } from "../../secrets/resolve.js";
 import { refreshChutesTokens } from "../chutes-oauth.js";
+import { MINIMAX_SECRET_PROXY_API_KEY_MARKER } from "../model-auth-markers.js";
 import { AUTH_STORE_LOCK_OPTIONS, log } from "./constants.js";
 import { resolveTokenExpiryState } from "./credential-state.js";
 import { formatAuthDoctorHint } from "./doctor.js";
@@ -62,6 +63,31 @@ const isCompatibleModeType = (mode: string | undefined, type: string | undefined
   // Both token and oauth represent bearer-token auth paths — allow bidirectional compat.
   return BEARER_AUTH_MODES.has(mode) && BEARER_AUTH_MODES.has(type);
 };
+
+function hasMinimaxSecretProxyEnabled(cfg: OpenClawConfig | undefined): boolean {
+  const envProxyUrl = process.env.OPENCLAW_MINIMAX_SECRET_PROXY_URL?.trim();
+  if (envProxyUrl) {
+    return true;
+  }
+  const models = cfg?.agents?.defaults?.models;
+  if (!models || typeof models !== "object") {
+    return false;
+  }
+  for (const [key, entry] of Object.entries(models)) {
+    if (!key.startsWith("minimax/")) {
+      continue;
+    }
+    const params = entry?.params;
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      continue;
+    }
+    const secretProxyUrl = params.secretProxyUrl;
+    if (typeof secretProxyUrl === "string" && secretProxyUrl.trim()) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function isProfileConfigCompatible(params: {
   cfg?: OpenClawConfig;
@@ -353,6 +379,14 @@ export async function resolveApiKeyForProfile(
       refFailureMessage: "failed to resolve auth profile api_key ref",
     });
     if (!key) {
+      return null;
+    }
+    // TEE marker is valid only when minimax secret-proxy is currently configured.
+    // When switching back to direct API mode, skip this placeholder and continue fallback.
+    if (
+      key.trim() === MINIMAX_SECRET_PROXY_API_KEY_MARKER &&
+      !hasMinimaxSecretProxyEnabled(configForRefResolution)
+    ) {
       return null;
     }
     return buildApiKeyProfileResult({ apiKey: key, provider: cred.provider, email: cred.email });

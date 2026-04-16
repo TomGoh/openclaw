@@ -586,7 +586,14 @@ export function extractMinimaxSecretProxyTriple(
   if (!models || typeof models !== "object") {
     return undefined;
   }
-  for (const key of Object.keys(models)) {
+  const primaryRaw = resolveAgentModelPrimaryValue(cfg.agents?.defaults?.model) ?? "";
+  const primary = primaryRaw.trim();
+  const orderedKeys = [
+    ...(primary.startsWith("minimax/") ? [primary] : []),
+    "minimax/MiniMax-M2.7",
+    ...Object.keys(models).filter((key) => key !== "minimax/MiniMax-M2.7" && key !== primary),
+  ];
+  for (const key of orderedKeys) {
     if (!key.startsWith("minimax/")) {
       continue;
     }

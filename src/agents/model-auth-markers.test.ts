@@ -4,12 +4,14 @@ import {
   GCP_VERTEX_CREDENTIALS_MARKER,
   isKnownEnvApiKeyMarker,
   isNonSecretApiKeyMarker,
+  MINIMAX_SECRET_PROXY_API_KEY_MARKER,
   NON_ENV_SECRETREF_MARKER,
   resolveOAuthApiKeyMarker,
 } from "./model-auth-markers.js";
 
 describe("model auth markers", () => {
   it("recognizes explicit non-secret markers", () => {
+    expect(isNonSecretApiKeyMarker(MINIMAX_SECRET_PROXY_API_KEY_MARKER)).toBe(true);
     expect(isNonSecretApiKeyMarker(NON_ENV_SECRETREF_MARKER)).toBe(true);
     expect(isNonSecretApiKeyMarker(resolveOAuthApiKeyMarker("chutes"))).toBe(true);
     expect(isNonSecretApiKeyMarker("ollama-local")).toBe(true);

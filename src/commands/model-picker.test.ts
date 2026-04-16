@@ -312,6 +312,67 @@ describe("MiniMax secret proxy + model allowlist", () => {
     });
   });
 
+  it("prefers minimax/MiniMax-M2.7 donor when minimax refs carry mixed secretProxy values", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "minimax/MiniMax-M2.5": {
+              params: {
+                secretProxyUrl: "http://127.0.0.1:19030",
+                secretProxyKeyId: 0,
+                secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+              },
+            },
+            "minimax/MiniMax-M2.7": {
+              params: {
+                secretProxyUrl: "http://127.0.0.1:19030",
+                secretProxyKeyId: 9,
+                secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    expect(extractMinimaxSecretProxyTriple(cfg)).toEqual({
+      secretProxyUrl: "http://127.0.0.1:19030",
+      secretProxyKeyId: 9,
+      secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+    });
+  });
+
+  it("prefers current primary minimax model donor over default minimax/MiniMax-M2.7", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          model: { primary: "minimax/MiniMax-M2.5" },
+          models: {
+            "minimax/MiniMax-M2.5": {
+              params: {
+                secretProxyUrl: "http://127.0.0.1:19030",
+                secretProxyKeyId: 17,
+                secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+              },
+            },
+            "minimax/MiniMax-M2.7": {
+              params: {
+                secretProxyUrl: "http://127.0.0.1:19030",
+                secretProxyKeyId: 9,
+                secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    expect(extractMinimaxSecretProxyTriple(cfg)).toEqual({
+      secretProxyUrl: "http://127.0.0.1:19030",
+      secretProxyKeyId: 17,
+      secretProxyEndpointUrl: "https://api.minimaxi.com/anthropic/v1/messages",
+    });
+  });
+
   it("after allowlist keeps only selected refs, reapplies donor onto every minimax/* key", () => {
     const donor = {
       secretProxyUrl: "http://127.0.0.1:19030",

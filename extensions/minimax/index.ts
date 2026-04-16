@@ -27,8 +27,8 @@ import {
 } from "./media-understanding-provider.js";
 import type { MiniMaxRegion } from "./oauth.js";
 import {
-  applyMinimaxApiConfig,
-  applyMinimaxApiConfigCn,
+  applyMinimaxApiConfigAsMergePatch,
+  applyMinimaxApiConfigCnAsMergePatch,
   buildMinimaxTeeSecretProxyConfigPatch,
 } from "./onboard.js";
 import { buildMinimaxPortalProvider, buildMinimaxProvider } from "./provider-catalog.js";
@@ -206,6 +206,7 @@ function createTeeSecretProxyAuthMethod(region: MiniMaxRegion): ProviderAuthMeth
         defaultModel: apiModelRef(DEFAULT_MODEL),
         notes: [
           "The API key was provisioned into the TEE via the CA; OpenClaw only stores a placeholder locally.",
+          `Configured secret proxy metadata: slot=${slot}, url=${secretProxyUrl}`,
           `Keep secret_proxy_ca serve running; set ${CA_ADMIN_TOKEN_ENV} on the CA host to protect admin routes.`,
         ],
       };
@@ -306,7 +307,7 @@ export default definePluginEntry({
           allowProfile: false,
           defaultModel: apiModelRef(DEFAULT_MODEL),
           expectedProviders: ["minimax"],
-          applyConfig: (cfg) => applyMinimaxApiConfig(cfg),
+          applyConfig: (cfg) => applyMinimaxApiConfigAsMergePatch(cfg),
           wizard: {
             choiceId: "minimax-global-api",
             choiceLabel: "MiniMax API key (Global)",
@@ -330,7 +331,7 @@ export default definePluginEntry({
           allowProfile: false,
           defaultModel: apiModelRef(DEFAULT_MODEL),
           expectedProviders: ["minimax", "minimax-cn"],
-          applyConfig: (cfg) => applyMinimaxApiConfigCn(cfg),
+          applyConfig: (cfg) => applyMinimaxApiConfigCnAsMergePatch(cfg),
           wizard: {
             choiceId: "minimax-cn-api",
             choiceLabel: "MiniMax API key (CN)",

@@ -63,6 +63,85 @@ export function upsertAuthProfile(params: {
   saveAuthProfileStore(store, params.agentDir);
 }
 
+export function removePlaintextApiKeyProfilesForProvider(params: {
+  provider: string;
+  keepProfileIds?: string[];
+  agentDir?: string;
+}): string[] {
+  const store = ensureAuthProfileStore(params.agentDir);
+  const providerKey = normalizeProviderIdForAuth(params.provider);
+  const keepIds = new Set(
+    (params.keepProfileIds ?? []).map((value) => value.trim()).filter(Boolean),
+  );
+  const removed: string[] = [];
+
+  for (const [profileId, credential] of Object.entries(store.profiles)) {
+    if (keepIds.has(profileId)) {
+      continue;
+    }
+    if (normalizeProviderIdForAuth(credential.provider) !== providerKey) {
+      continue;
+    }
+    if (credential.type !== "api_key") {
+      continue;
+    }
+    if (typeof credential.key !== "string" || credential.key.trim().length === 0) {
+      continue;
+    }
+    delete store.profiles[profileId];
+    removed.push(profileId);
+  }
+
+  if (removed.length === 0) {
+    return removed;
+  }
+
+  const removedSet = new Set(removed);
+  if (store.order && typeof store.order === "object") {
+    for (const [providerId, order] of Object.entries(store.order)) {
+      if (normalizeProviderIdForAuth(providerId) !== providerKey || !Array.isArray(order)) {
+        continue;
+      }
+      const nextOrder = order.filter((profileId) => !removedSet.has(profileId));
+      if (nextOrder.length > 0) {
+        store.order[providerId] = nextOrder;
+      } else {
+        delete store.order[providerId];
+      }
+    }
+    if (Object.keys(store.order).length === 0) {
+      store.order = undefined;
+    }
+  }
+
+  if (store.lastGood && typeof store.lastGood === "object") {
+    for (const [providerId, profileId] of Object.entries(store.lastGood)) {
+      if (
+        normalizeProviderIdForAuth(providerId) === providerKey &&
+        typeof profileId === "string" &&
+        removedSet.has(profileId)
+      ) {
+        delete store.lastGood[providerId];
+      }
+    }
+    if (Object.keys(store.lastGood).length === 0) {
+      store.lastGood = undefined;
+    }
+  }
+
+  if (store.usageStats && typeof store.usageStats === "object") {
+    for (const profileId of removed) {
+      delete store.usageStats[profileId];
+    }
+    if (Object.keys(store.usageStats).length === 0) {
+      store.usageStats = undefined;
+    }
+  }
+
+  saveAuthProfileStore(store, params.agentDir);
+  return removed;
+}
+
 export async function upsertAuthProfileWithLock(params: {
   profileId: string;
   credential: AuthProfileCredential;

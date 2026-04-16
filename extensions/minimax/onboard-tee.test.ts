@@ -1,6 +1,12 @@
 import { MINIMAX_DEFAULT_MODEL_ID } from "openclaw/plugin-sdk/provider-models";
 import { describe, expect, it } from "vitest";
-import { buildMinimaxTeeSecretProxyConfigPatch } from "./onboard.js";
+import { mergeConfigPatch } from "../../src/plugins/provider-auth-choice-helpers.js";
+import {
+  applyMinimaxApiConfig,
+  applyMinimaxApiConfigAsMergePatch,
+  buildMinimaxTeeSecretProxyConfigPatch,
+  stripMinimaxSecretProxyFromConfig,
+} from "./onboard.js";
 import { MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER } from "./secret-proxy-wrapper.js";
 
 describe("buildMinimaxTeeSecretProxyConfigPatch", () => {
@@ -52,5 +58,128 @@ describe("buildMinimaxTeeSecretProxyConfigPatch", () => {
     expect(p25?.secretProxyKeyId).toBe(2);
     expect(p27?.secretProxyUrl).toBe("http://127.0.0.1:18790");
     expect(p27?.secretProxyKeyId).toBe(2);
+  });
+
+  it("updates existing TEE secretProxy params on repeated configure runs", () => {
+    const first = buildMinimaxTeeSecretProxyConfigPatch(
+      {},
+      {
+        region: "global",
+        secretProxyUrl: "http://127.0.0.1:18790",
+        secretProxyKeyId: 1,
+      },
+    );
+    const second = buildMinimaxTeeSecretProxyConfigPatch(first, {
+      region: "global",
+      secretProxyUrl: "http://127.0.0.1:19999",
+      secretProxyKeyId: 7,
+    });
+    const params = second.agents?.defaults?.models?.[`minimax/${MINIMAX_DEFAULT_MODEL_ID}`]
+      ?.params as Record<string, unknown> | undefined;
+    expect(params?.secretProxyUrl).toBe("http://127.0.0.1:19999");
+    expect(params?.secretProxyKeyId).toBe(7);
+  });
+
+  it("configure-like flow: mergeConfigPatch across repeated TEE runs keeps latest secretProxyKeyId", () => {
+    const firstPatch = buildMinimaxTeeSecretProxyConfigPatch(
+      {},
+      {
+        region: "global",
+        secretProxyUrl: "http://127.0.0.1:18790",
+        secretProxyKeyId: 1,
+      },
+    );
+    const firstSaved = mergeConfigPatch({}, firstPatch);
+
+    const secondPatch = buildMinimaxTeeSecretProxyConfigPatch(firstSaved, {
+      region: "global",
+      secretProxyUrl: "http://127.0.0.1:28888",
+      secretProxyKeyId: 9,
+    });
+    const secondSaved = mergeConfigPatch(firstSaved, secondPatch) as {
+      agents?: {
+        defaults?: { models?: Record<string, { params?: Record<string, unknown> }> };
+      };
+    };
+
+    const params = secondSaved.agents?.defaults?.models?.[`minimax/${MINIMAX_DEFAULT_MODEL_ID}`]
+      ?.params as Record<string, unknown> | undefined;
+    expect(params?.secretProxyUrl).toBe("http://127.0.0.1:28888");
+    expect(params?.secretProxyKeyId).toBe(9);
+  });
+});
+
+describe("stripMinimaxSecretProxyFromConfig / direct API after TEE", () => {
+  it("removes secretProxy* from all minimax/* models and placeholder provider apiKey", () => {
+    const tee = buildMinimaxTeeSecretProxyConfigPatch(
+      {},
+      {
+        region: "global",
+        secretProxyUrl: "http://127.0.0.1:18790",
+        secretProxyKeyId: 0,
+      },
+    );
+    const direct = applyMinimaxApiConfig(tee, MINIMAX_DEFAULT_MODEL_ID);
+    expect(direct.models?.providers?.minimax?.apiKey).toBeUndefined();
+    const ref = `minimax/${MINIMAX_DEFAULT_MODEL_ID}`;
+    const params = direct.agents?.defaults?.models?.[ref]?.params as
+      | Record<string, unknown>
+      | undefined;
+    expect(params?.secretProxyUrl).toBeUndefined();
+    expect(params?.secretProxyKeyId).toBeUndefined();
+    expect(params?.secretProxyEndpointUrl).toBeUndefined();
+  });
+
+  it("preserves non-secret params on minimax/* when stripping", () => {
+    const withCustom = buildMinimaxTeeSecretProxyConfigPatch(
+      {
+        agents: {
+          defaults: {
+            models: {
+              "minimax/MiniMax-M2.5": {
+                alias: "m25",
+                params: { custom: "keep-me" },
+              },
+            },
+          },
+        },
+      },
+      {
+        region: "global",
+        secretProxyUrl: "http://127.0.0.1:18790",
+        secretProxyKeyId: 1,
+      },
+    );
+    const direct = applyMinimaxApiConfig(withCustom, MINIMAX_DEFAULT_MODEL_ID);
+    const p25 = direct.agents?.defaults?.models?.["minimax/MiniMax-M2.5"]?.params as
+      | Record<string, unknown>
+      | undefined;
+    expect(p25?.custom).toBe("keep-me");
+    expect(p25?.secretProxyUrl).toBeUndefined();
+  });
+
+  it("stripMinimaxSecretProxyFromConfig is idempotent on clean config", () => {
+    expect(stripMinimaxSecretProxyFromConfig({})).toEqual({});
+  });
+
+  it("wizard merge: mergeConfigPatch + merge-patch applier removes secretProxy* from file-backed config", () => {
+    const tee = buildMinimaxTeeSecretProxyConfigPatch(
+      {},
+      {
+        region: "global",
+        secretProxyUrl: "http://127.0.0.1:18790",
+        secretProxyKeyId: 2,
+      },
+    );
+    const patch = applyMinimaxApiConfigAsMergePatch(tee, MINIMAX_DEFAULT_MODEL_ID);
+    const merged = mergeConfigPatch(tee, patch);
+    const ref = `minimax/${MINIMAX_DEFAULT_MODEL_ID}`;
+    const params = merged.agents?.defaults?.models?.[ref]?.params as
+      | Record<string, unknown>
+      | undefined;
+    expect(params?.secretProxyUrl).toBeUndefined();
+    expect(params?.secretProxyKeyId).toBeUndefined();
+    expect(params?.secretProxyEndpointUrl).toBeUndefined();
+    expect(merged.models?.providers?.minimax?.apiKey).toBeUndefined();
   });
 });

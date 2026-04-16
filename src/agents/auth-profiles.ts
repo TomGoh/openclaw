@@ -13,6 +13,7 @@ export {
   dedupeProfileIds,
   listProfilesForProvider,
   markAuthProfileGood,
+  removePlaintextApiKeyProfilesForProvider,
   setAuthProfileOrder,
   upsertAuthProfile,
   upsertAuthProfileWithLock,

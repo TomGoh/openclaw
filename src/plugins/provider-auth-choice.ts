@@ -4,7 +4,11 @@ import {
   resolveAgentDir,
   resolveAgentWorkspaceDir,
 } from "../agents/agent-scope.js";
-import { upsertAuthProfile } from "../agents/auth-profiles.js";
+import {
+  removePlaintextApiKeyProfilesForProvider,
+  upsertAuthProfile,
+  type AuthProfileCredential,
+} from "../agents/auth-profiles.js";
 import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -44,6 +48,18 @@ export type PluginProviderAuthChoiceOptions = {
   methodId?: string;
   label: string;
 };
+
+function isMiniMaxTeePlaceholderCredential(credential: AuthProfileCredential): boolean {
+  if (credential.type !== "api_key") {
+    return false;
+  }
+  const provider = credential.provider.trim().toLowerCase();
+  if (provider !== "minimax") {
+    return false;
+  }
+  const key = credential.key?.trim().toLowerCase();
+  return Boolean(key && key.startsWith("openclaw-") && key.includes("secret-proxy"));
+}
 
 function restoreConfiguredPrimaryModel(
   nextConfig: OpenClawConfig,
@@ -146,6 +162,17 @@ export async function runProviderPluginAuthMethod(params: {
       ...("displayName" in profile.credential && profile.credential.displayName
         ? { displayName: profile.credential.displayName }
         : {}),
+    });
+  }
+
+  const minimaxTeeProfileIds = result.profiles
+    .filter((profile) => isMiniMaxTeePlaceholderCredential(profile.credential))
+    .map((profile) => profile.profileId);
+  if (minimaxTeeProfileIds.length > 0) {
+    removePlaintextApiKeyProfilesForProvider({
+      provider: "minimax",
+      keepProfileIds: minimaxTeeProfileIds,
+      agentDir,
     });
   }
 

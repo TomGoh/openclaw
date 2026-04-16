@@ -211,6 +211,81 @@ describe("getApiKeyForModel", () => {
     );
   });
 
+  it("skips minimax tee placeholder profile and falls back to real api_key profile", async () => {
+    const resolved = await resolveApiKeyForProvider({
+      provider: "minimax",
+      store: {
+        version: 1,
+        profiles: {
+          "minimax:tee-global": {
+            type: "api_key",
+            provider: "minimax",
+            key: "openclaw-minimax-secret-proxy",
+          },
+          "minimax:global": {
+            type: "api_key",
+            provider: "minimax",
+            key: "sk-minimax-direct-key",
+          },
+        },
+      },
+    });
+    expect(resolved.profileId).toBe("minimax:global");
+    expect(resolved.apiKey).toBe("sk-minimax-direct-key");
+  });
+
+  it("keeps minimax tee placeholder profile when minimax secret proxy is enabled", async () => {
+    const resolved = await resolveApiKeyForProvider({
+      provider: "minimax",
+      cfg: {
+        agents: {
+          defaults: {
+            models: {
+              "minimax/MiniMax-M2.7": {
+                params: { secretProxyUrl: "http://127.0.0.1:19030" },
+              },
+            },
+          },
+        },
+      },
+      store: {
+        version: 1,
+        profiles: {
+          "minimax:tee-global": {
+            type: "api_key",
+            provider: "minimax",
+            key: "openclaw-minimax-secret-proxy",
+          },
+        },
+      },
+    });
+    expect(resolved.profileId).toBe("minimax:tee-global");
+    expect(resolved.apiKey).toBe("openclaw-minimax-secret-proxy");
+  });
+
+  it("keeps minimax tee placeholder profile when env-only minimax secret proxy is enabled", async () => {
+    await withEnvAsync(
+      { OPENCLAW_MINIMAX_SECRET_PROXY_URL: "http://127.0.0.1:19030" },
+      async () => {
+        const resolved = await resolveApiKeyForProvider({
+          provider: "minimax",
+          store: {
+            version: 1,
+            profiles: {
+              "minimax:tee-global": {
+                type: "api_key",
+                provider: "minimax",
+                key: "openclaw-minimax-secret-proxy",
+              },
+            },
+          },
+        });
+        expect(resolved.profileId).toBe("minimax:tee-global");
+        expect(resolved.apiKey).toBe("openclaw-minimax-secret-proxy");
+      },
+    );
+  });
+
   it("hasAvailableAuthForProvider('google') accepts GOOGLE_API_KEY fallback", async () => {
     await withEnvAsync(
       {

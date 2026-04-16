@@ -41,16 +41,36 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+/**
+ * Deep-merge `patch` into `base`. Plain objects merge recursively; **`null` in `patch` removes
+ * the corresponding key** (JSON Merge Patch style) so auth `configPatch` can clear nested fields
+ * such as `agents.defaults.models["minimax/…"].params.secretProxyUrl` when switching auth modes.
+ */
 export function mergeConfigPatch<T>(base: T, patch: unknown): T {
-  if (!isPlainRecord(base) || !isPlainRecord(patch)) {
+  if (patch === undefined) {
+    return base;
+  }
+  if (!isPlainRecord(patch)) {
     return patch as T;
   }
 
-  const next: Record<string, unknown> = { ...base };
+  const baseRecord: Record<string, unknown> = isPlainRecord(base)
+    ? { ...(base as Record<string, unknown>) }
+    : {};
+  const next: Record<string, unknown> = { ...baseRecord };
+
   for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete next[key];
+      continue;
+    }
     const existing = next[key];
-    if (isPlainRecord(existing) && isPlainRecord(value)) {
-      next[key] = mergeConfigPatch(existing, value);
+    if (isPlainRecord(value)) {
+      if (isPlainRecord(existing)) {
+        next[key] = mergeConfigPatch(existing, value);
+      } else {
+        next[key] = mergeConfigPatch({}, value);
+      }
     } else {
       next[key] = value;
     }

@@ -2,6 +2,8 @@ import type { SecretRefSource } from "../config/types.secrets.js";
 import { listKnownProviderEnvApiKeyNames } from "./model-auth-env-vars.js";
 
 export const MINIMAX_OAUTH_MARKER = "minimax-oauth";
+/** TEE / secret-proxy auth profile key; must match `extensions/minimax/secret-proxy-wrapper.ts`. */
+export const MINIMAX_SECRET_PROXY_API_KEY_MARKER = "openclaw-minimax-secret-proxy";
 export const OAUTH_API_KEY_MARKER_PREFIX = "oauth:";
 export const OLLAMA_LOCAL_AUTH_MARKER = "ollama-local";
 export const CUSTOM_LOCAL_AUTH_MARKER = "custom-local";
@@ -79,6 +81,7 @@ export function isNonSecretApiKeyMarker(
   }
   const isKnownMarker =
     trimmed === MINIMAX_OAUTH_MARKER ||
+    trimmed === MINIMAX_SECRET_PROXY_API_KEY_MARKER ||
     isOAuthApiKeyMarker(trimmed) ||
     trimmed === OLLAMA_LOCAL_AUTH_MARKER ||
     trimmed === CUSTOM_LOCAL_AUTH_MARKER ||
