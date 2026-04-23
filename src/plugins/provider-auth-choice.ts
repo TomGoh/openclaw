@@ -9,6 +9,7 @@ import {
   upsertAuthProfile,
   type AuthProfileCredential,
 } from "../agents/auth-profiles.js";
+import { isSecretProxyApiKeyMarker } from "../agents/model-auth-markers.js";
 import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -49,16 +50,14 @@ export type PluginProviderAuthChoiceOptions = {
   label: string;
 };
 
-function isMiniMaxTeePlaceholderCredential(credential: AuthProfileCredential): boolean {
+function isSecretProxyPlaceholderCredential(credential: AuthProfileCredential): boolean {
   if (credential.type !== "api_key") {
     return false;
   }
-  const provider = credential.provider.trim().toLowerCase();
-  if (provider !== "minimax") {
+  if (credential.key === undefined) {
     return false;
   }
-  const key = credential.key?.trim().toLowerCase();
-  return Boolean(key && key.startsWith("openclaw-") && key.includes("secret-proxy"));
+  return isSecretProxyApiKeyMarker(credential.key, { providerId: credential.provider });
 }
 
 function restoreConfiguredPrimaryModel(
@@ -165,13 +164,20 @@ export async function runProviderPluginAuthMethod(params: {
     });
   }
 
-  const minimaxTeeProfileIds = result.profiles
-    .filter((profile) => isMiniMaxTeePlaceholderCredential(profile.credential))
-    .map((profile) => profile.profileId);
-  if (minimaxTeeProfileIds.length > 0) {
+  const keepProfileIdsByProvider = new Map<string, string[]>();
+  for (const profile of result.profiles) {
+    if (!isSecretProxyPlaceholderCredential(profile.credential)) {
+      continue;
+    }
+    const provider = profile.credential.provider.trim().toLowerCase();
+    const bucket = keepProfileIdsByProvider.get(provider) ?? [];
+    bucket.push(profile.profileId);
+    keepProfileIdsByProvider.set(provider, bucket);
+  }
+  for (const [provider, keepProfileIds] of keepProfileIdsByProvider) {
     removePlaintextApiKeyProfilesForProvider({
-      provider: "minimax",
-      keepProfileIds: minimaxTeeProfileIds,
+      provider,
+      keepProfileIds,
       agentDir,
     });
   }

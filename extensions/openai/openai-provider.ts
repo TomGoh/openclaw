@@ -1,8 +1,15 @@
 import {
+  type ProviderAuthContext,
+  type ProviderAuthMethod,
+  type ProviderAuthResult,
   type ProviderResolveDynamicModelContext,
   type ProviderRuntimeModel,
 } from "openclaw/plugin-sdk/plugin-entry";
-import { createProviderApiKeyAuthMethod } from "openclaw/plugin-sdk/provider-auth";
+import {
+  createProviderApiKeyAuthMethod,
+  resolveSecretProxyApiKeyMarker,
+} from "openclaw/plugin-sdk/provider-auth";
+import { addWhitelistViaCa, provisionKeyViaCa } from "openclaw/plugin-sdk/provider-auth";
 import {
   applyOpenAIConfig,
   DEFAULT_CONTEXT_TOKENS,
@@ -15,6 +22,11 @@ import {
   createOpenAIAttributionHeadersWrapper,
   createOpenAIDefaultTransportWrapper,
 } from "openclaw/plugin-sdk/provider-stream";
+import {
+  applyOpenAIApiConfigAsMergePatch,
+  buildOpenAISecretProxyConfigPatch,
+  createOpenAISecretProxyWrapper,
+} from "./secret-proxy.js";
 import {
   cloneFirstTemplateModel,
   findCatalogTemplate,
@@ -49,6 +61,126 @@ const OPENAI_MODERN_MODEL_IDS = [
 ] as const;
 const OPENAI_DIRECT_SPARK_MODEL_ID = "gpt-5.3-codex-spark";
 const SUPPRESSED_SPARK_PROVIDERS = new Set(["openai", "azure-openai-responses"]);
+
+const CA_ADMIN_TOKEN_ENV = "SECRET_PROXY_CA_ADMIN_TOKEN";
+
+/** Matches `scripts/start-crosvm-tee*.sh` dev default; override via env or at prompt for production. */
+const DEFAULT_SECRET_PROXY_CA_ADMIN_TOKEN = "dev-admin-token-change-me-please-0001";
+const OPENAI_SECRET_PROXY_WHITELIST_PATTERN = "https://api.openai.com/";
+
+function createOpenAISecretProxyAuthMethod(): ProviderAuthMethod {
+  return {
+    id: "api-secret-proxy",
+    label: "OpenAI via Secret Proxy",
+    hint: "Provision API key into TA via CA (same flow as MiniMax TEE / Secret Proxy)",
+    kind: "custom",
+    wizard: {
+      choiceId: "openai-secret-proxy",
+      choiceLabel: "OpenAI via Secret Proxy",
+      choiceHint: "Key stays in TEE; OpenClaw stores proxy metadata only",
+      groupId: "openai",
+      groupLabel: "OpenAI",
+      groupHint: "Codex OAuth + API key",
+    },
+    run: async (ctx: ProviderAuthContext): Promise<ProviderAuthResult> => {
+      const envProxy =
+        process.env.OPENCLAW_OPENAI_SECRET_PROXY_URL?.trim() ||
+        process.env.OPENCLAW_MINIMAX_SECRET_PROXY_URL?.trim();
+      const caBaseRaw = await ctx.prompter.text({
+        message: "Secret proxy CA base URL (where secret_proxy_ca serve listens)",
+        initialValue: envProxy ?? "http://127.0.0.1:19030",
+        validate: (value) => {
+          const v = value.trim();
+          if (!v) {
+            return "URL required";
+          }
+          try {
+            new URL(v);
+          } catch {
+            return "Invalid URL";
+          }
+          return undefined;
+        },
+      });
+      const caBaseUrl = caBaseRaw.trim();
+
+      const envToken =
+        process.env.SECRET_PROXY_CA_ADMIN_TOKEN?.trim() ||
+        process.env.OPENCLAW_SECRET_PROXY_CA_ADMIN_TOKEN?.trim();
+      const adminToken = await ctx.prompter.text({
+        message: `Admin token (must match ${CA_ADMIN_TOKEN_ENV} on the CA host)`,
+        initialValue: envToken ?? DEFAULT_SECRET_PROXY_CA_ADMIN_TOKEN,
+        validate: (value) => (!value.trim() ? "Token required" : undefined),
+      });
+
+      const slotStr = await ctx.prompter.text({
+        message: "TEE key slot index",
+        initialValue: process.env.OPENCLAW_OPENAI_SECRET_PROXY_KEY_ID ?? "0",
+        validate: (value) => {
+          const n = Number.parseInt(value.trim(), 10);
+          if (!Number.isFinite(n) || n < 0) {
+            return "Enter a non-negative integer";
+          }
+          return undefined;
+        },
+      });
+      const slot = Number.parseInt(slotStr.trim(), 10);
+      const auditRequestId = `openai-configure-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+
+      const apiKey = await ctx.prompter.text({
+        message: "OpenAI API key (sk-proj- or sk-...)",
+        validate: (value) => (!value.trim() ? "API key required" : undefined),
+      });
+
+      await provisionKeyViaCa({
+        caBaseUrl,
+        adminToken: adminToken.trim(),
+        slot,
+        key: apiKey.trim(),
+        provider: "openai",
+        actor: "openclaw-configure",
+        requestId: auditRequestId,
+      });
+      await addWhitelistViaCa({
+        caBaseUrl,
+        adminToken: adminToken.trim(),
+        pattern: OPENAI_SECRET_PROXY_WHITELIST_PATTERN,
+        actor: "openclaw-configure",
+        requestId: auditRequestId,
+      });
+
+      const secretProxyUrl = caBaseUrl.replace(/\/+$/, "");
+      const placeholderKey = resolveSecretProxyApiKeyMarker(PROVIDER_ID);
+      return {
+        profiles: [
+          {
+            profileId: "openai:secret-proxy",
+            credential: {
+              type: "api_key",
+              provider: PROVIDER_ID,
+              key: placeholderKey,
+            },
+          },
+        ],
+        configPatch: buildOpenAISecretProxyConfigPatch({
+          config: ctx.config,
+          placeholderApiKey: placeholderKey,
+          secretProxyUrl,
+          secretProxyKeyId: slot,
+        }),
+        defaultModel: OPENAI_DEFAULT_MODEL,
+        notes: [
+          "The API key was provisioned into the TEE via the CA; OpenClaw only stores a placeholder locally.",
+          `Ensured TA whitelist includes ${OPENAI_SECRET_PROXY_WHITELIST_PATTERN}`,
+          `Configured secret proxy metadata: slot=${slot}, url=${secretProxyUrl}`,
+          `Keep secret_proxy_ca serve running; set ${CA_ADMIN_TOKEN_ENV} on the CA host to protect admin routes.`,
+          "For non-interactive runs set OPENCLAW_OPENAI_SECRET_PROXY_URL and OPENCLAW_OPENAI_SECRET_PROXY_KEY_ID (or reuse OPENCLAW_MINIMAX_SECRET_PROXY_URL when sharing one CA).",
+        ],
+      };
+    },
+    runNonInteractive: async () => null,
+  };
+}
 
 function normalizeOpenAITransport(model: ProviderRuntimeModel): ProviderRuntimeModel {
   const useResponsesTransport =
@@ -152,7 +284,7 @@ export function buildOpenAIProvider(): ProviderPlugin {
         promptMessage: "Enter OpenAI API key",
         defaultModel: OPENAI_DEFAULT_MODEL,
         expectedProviders: ["openai"],
-        applyConfig: (cfg) => applyOpenAIConfig(cfg),
+        applyConfig: (cfg) => applyOpenAIApiConfigAsMergePatch(cfg),
         wizard: {
           choiceId: "openai-api-key",
           choiceLabel: "OpenAI API key",
@@ -161,6 +293,7 @@ export function buildOpenAIProvider(): ProviderPlugin {
           groupHint: "Codex OAuth + API key",
         },
       }),
+      createOpenAISecretProxyAuthMethod(),
     ],
     resolveDynamicModel: (ctx) => resolveOpenAIGpt54ForwardCompatModel(ctx),
     normalizeResolvedModel: (ctx) => {
@@ -173,7 +306,14 @@ export function buildOpenAIProvider(): ProviderPlugin {
       providerFamily: "openai",
     },
     wrapStreamFn: (ctx) =>
-      createOpenAIAttributionHeadersWrapper(createOpenAIDefaultTransportWrapper(ctx.streamFn)),
+      createOpenAISecretProxyWrapper({
+        baseStreamFn: createOpenAIAttributionHeadersWrapper(
+          createOpenAIDefaultTransportWrapper(ctx.streamFn),
+        ),
+        extraParams: ctx.extraParams,
+        config: ctx.config,
+        placeholderApiKey: resolveSecretProxyApiKeyMarker(PROVIDER_ID),
+      }),
     supportsXHighThinking: ({ modelId }) => matchesExactOrPrefix(modelId, OPENAI_XHIGH_MODEL_IDS),
     isModernModelRef: ({ modelId }) => matchesExactOrPrefix(modelId, OPENAI_MODERN_MODEL_IDS),
     buildMissingAuthMessage: (ctx) => {

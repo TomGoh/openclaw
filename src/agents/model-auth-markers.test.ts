@@ -4,14 +4,17 @@ import {
   GCP_VERTEX_CREDENTIALS_MARKER,
   isKnownEnvApiKeyMarker,
   isNonSecretApiKeyMarker,
+  isSecretProxyApiKeyMarker,
   MINIMAX_SECRET_PROXY_API_KEY_MARKER,
   NON_ENV_SECRETREF_MARKER,
   resolveOAuthApiKeyMarker,
+  resolveSecretProxyApiKeyMarker,
 } from "./model-auth-markers.js";
 
 describe("model auth markers", () => {
   it("recognizes explicit non-secret markers", () => {
     expect(isNonSecretApiKeyMarker(MINIMAX_SECRET_PROXY_API_KEY_MARKER)).toBe(true);
+    expect(isNonSecretApiKeyMarker(resolveSecretProxyApiKeyMarker("openai"))).toBe(true);
     expect(isNonSecretApiKeyMarker(NON_ENV_SECRETREF_MARKER)).toBe(true);
     expect(isNonSecretApiKeyMarker(resolveOAuthApiKeyMarker("chutes"))).toBe(true);
     expect(isNonSecretApiKeyMarker("ollama-local")).toBe(true);
@@ -20,6 +23,22 @@ describe("model auth markers", () => {
 
   it("does not treat removed provider markers as active auth markers", () => {
     expect(isNonSecretApiKeyMarker("qwen-oauth")).toBe(false);
+  });
+
+  it("matches provider-specific and legacy secret-proxy markers", () => {
+    expect(isSecretProxyApiKeyMarker(resolveSecretProxyApiKeyMarker("openai"))).toBe(true);
+    expect(
+      isSecretProxyApiKeyMarker(resolveSecretProxyApiKeyMarker("openai"), { providerId: "openai" }),
+    ).toBe(true);
+    expect(
+      isSecretProxyApiKeyMarker(resolveSecretProxyApiKeyMarker("openai"), {
+        providerId: "minimax",
+      }),
+    ).toBe(false);
+    expect(isSecretProxyApiKeyMarker(MINIMAX_SECRET_PROXY_API_KEY_MARKER)).toBe(true);
+    expect(
+      isSecretProxyApiKeyMarker(MINIMAX_SECRET_PROXY_API_KEY_MARKER, { providerId: "minimax" }),
+    ).toBe(true);
   });
 
   it("recognizes known env marker names but not arbitrary all-caps keys", () => {

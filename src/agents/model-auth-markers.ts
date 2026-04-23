@@ -4,6 +4,7 @@ import { listKnownProviderEnvApiKeyNames } from "./model-auth-env-vars.js";
 export const MINIMAX_OAUTH_MARKER = "minimax-oauth";
 /** TEE / secret-proxy auth profile key; must match `extensions/minimax/secret-proxy-wrapper.ts`. */
 export const MINIMAX_SECRET_PROXY_API_KEY_MARKER = "openclaw-minimax-secret-proxy";
+export const SECRET_PROXY_API_KEY_MARKER_PREFIX = "openclaw-secret-proxy:";
 export const OAUTH_API_KEY_MARKER_PREFIX = "oauth:";
 export const OLLAMA_LOCAL_AUTH_MARKER = "ollama-local";
 export const CUSTOM_LOCAL_AUTH_MARKER = "custom-local";
@@ -52,6 +53,38 @@ export function isOAuthApiKeyMarker(value: string): boolean {
   return value.trim().startsWith(OAUTH_API_KEY_MARKER_PREFIX);
 }
 
+export function resolveSecretProxyApiKeyMarker(providerId: string): string {
+  return `${SECRET_PROXY_API_KEY_MARKER_PREFIX}${providerId.trim().toLowerCase()}`;
+}
+
+export function resolveLegacySecretProxyApiKeyMarkers(providerId: string): string[] {
+  const normalized = providerId.trim().toLowerCase();
+  if (normalized === "minimax") {
+    return [MINIMAX_SECRET_PROXY_API_KEY_MARKER];
+  }
+  return [];
+}
+
+export function isSecretProxyApiKeyMarker(
+  value: string,
+  options?: { providerId?: string | undefined },
+): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.startsWith(SECRET_PROXY_API_KEY_MARKER_PREFIX)) {
+    if (!options?.providerId) {
+      return true;
+    }
+    return trimmed === resolveSecretProxyApiKeyMarker(options.providerId);
+  }
+  if (!options?.providerId) {
+    return trimmed === MINIMAX_SECRET_PROXY_API_KEY_MARKER;
+  }
+  return resolveLegacySecretProxyApiKeyMarkers(options.providerId).includes(trimmed);
+}
+
 export function resolveNonEnvSecretRefApiKeyMarker(_source: SecretRefSource): string {
   return NON_ENV_SECRETREF_MARKER;
 }
@@ -82,6 +115,7 @@ export function isNonSecretApiKeyMarker(
   const isKnownMarker =
     trimmed === MINIMAX_OAUTH_MARKER ||
     trimmed === MINIMAX_SECRET_PROXY_API_KEY_MARKER ||
+    isSecretProxyApiKeyMarker(trimmed) ||
     isOAuthApiKeyMarker(trimmed) ||
     trimmed === OLLAMA_LOCAL_AUTH_MARKER ||
     trimmed === CUSTOM_LOCAL_AUTH_MARKER ||

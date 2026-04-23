@@ -22,6 +22,7 @@ export {
   createOpenAIAttributionHeadersWrapper,
   createOpenAIDefaultTransportWrapper,
 } from "../agents/pi-embedded-runner/openai-stream-wrappers.js";
+export { createProviderSecretProxyWrapper } from "../agents/pi-embedded-runner/secret-proxy-stream-wrapper.js";
 export {
   createToolStreamWrapper,
   createZaiToolStreamWrapper,

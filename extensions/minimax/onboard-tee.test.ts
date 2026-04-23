@@ -27,6 +27,11 @@ describe("buildMinimaxTeeSecretProxyConfigPatch", () => {
     expect(params?.secretProxyUrl).toBe("http://127.0.0.1:18790");
     expect(params?.secretProxyKeyId).toBe(3);
     expect(String(params?.secretProxyEndpointUrl)).toMatch(/\/v1\/messages$/);
+    expect(params?.secretProxy).toEqual({
+      url: "http://127.0.0.1:18790",
+      keyId: 3,
+      endpointUrl: expect.stringMatching(/\/v1\/messages$/),
+    });
     const dumped = JSON.stringify(next);
     expect(dumped).not.toMatch(/sk-api-/);
   });
@@ -128,6 +133,7 @@ describe("stripMinimaxSecretProxyFromConfig / direct API after TEE", () => {
     expect(params?.secretProxyUrl).toBeUndefined();
     expect(params?.secretProxyKeyId).toBeUndefined();
     expect(params?.secretProxyEndpointUrl).toBeUndefined();
+    expect(params?.secretProxy).toBeUndefined();
   });
 
   it("preserves non-secret params on minimax/* when stripping", () => {
@@ -180,6 +186,7 @@ describe("stripMinimaxSecretProxyFromConfig / direct API after TEE", () => {
     expect(params?.secretProxyUrl).toBeUndefined();
     expect(params?.secretProxyKeyId).toBeUndefined();
     expect(params?.secretProxyEndpointUrl).toBeUndefined();
+    expect(params?.secretProxy).toBeUndefined();
     expect(merged.models?.providers?.minimax?.apiKey).toBeUndefined();
   });
 });

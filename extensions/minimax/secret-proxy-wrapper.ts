@@ -6,6 +6,7 @@ import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai"; // 真正发 HTTP 请求的函数
 import { MINIMAX_DEFAULT_MODEL_ID } from "openclaw/plugin-sdk/provider-models";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/provider-onboard";
+import { createProviderSecretProxyWrapper } from "openclaw/plugin-sdk/provider-stream";
 
 /** 启用 secret proxy 时传给 pi-ai / Anthropic SDK 的 apiKey，避免真实 MiniMax 密钥出现在发往 CA 的 HTTP（如 X-Api-Key）中；由 TA 按 key_id 注入真密钥。 */
 export const MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER = "openclaw-minimax-secret-proxy";
@@ -14,17 +15,6 @@ export const MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER = "openclaw-minimax-secret
 const SECRET_PROXY_URL_ENV = "OPENCLAW_MINIMAX_SECRET_PROXY_URL";
 const SECRET_PROXY_KEY_ID_ENV = "OPENCLAW_MINIMAX_SECRET_PROXY_KEY_ID";
 const SECRET_PROXY_ENDPOINT_URL_ENV = "OPENCLAW_MINIMAX_SECRET_PROXY_ENDPOINT_URL";
-
-type SecretProxyMethod = "Get" | "Post" | "Put" | "Delete" | "Patch";
-
-// SecretProxyRequest 发给代理的 JSON 协议
-type SecretProxyRequest = {
-  key_id: number;
-  endpoint_url: string;
-  method: SecretProxyMethod;
-  headers: Record<string, string>;
-  body: number[];
-};
 
 // 去掉末尾'/' ，避免后续拼接路径时出现 "//v1/messages" 之类的问题
 function normalizeBaseUrl(value: string): string {
@@ -81,20 +71,6 @@ function resolveEndpointUrl(modelBaseUrl: unknown, extraParams?: Record<string, 
   const baseUrl = typeof modelBaseUrl === "string" ? modelBaseUrl.trim() : "";
   const normalizedBase = normalizeBaseUrl(baseUrl);
   return `${normalizedBase}/v1/messages`;
-}
-
-function toHeaderMap(headers: unknown): Record<string, string> {
-  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
-    return {};
-  }
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (typeof value !== "string") {
-      continue;
-    }
-    mapped[key] = value;
-  }
-  return mapped;
 }
 
 /** TEE onboarding only attaches secretProxy* to the default model ref; copy from there for other minimax/* models. */
@@ -173,38 +149,12 @@ export function createMinimaxSecretProxyWrapper(params: {
     return underlying;
   }
 
-  return (model, context, options) => {
-    const originModelBaseUrl = model.baseUrl;
-    const endpointUrl = resolveEndpointUrl(originModelBaseUrl, mergedParams);
-    const keyId = resolveSecretProxyKeyId(mergedParams);
-    const originalOnPayload = options?.onPayload;
-
-    const proxyModel = { ...model, baseUrl: secretProxyUrl };
-    const proxyOptions = {
-      ...options,
-      apiKey: MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER,
-      onPayload: (payload: unknown) => {
-        const onPayloadResult = originalOnPayload?.(payload, model);
-        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-          return onPayloadResult;
-        }
-        const payloadJson = JSON.stringify(payload);
-        const proxyRequest: SecretProxyRequest = {
-          key_id: keyId,
-          endpoint_url: endpointUrl,
-          method: "Post",
-          headers: {
-            ...toHeaderMap(model.headers),
-            ...toHeaderMap(options?.headers),
-          },
-          body: Array.from(new TextEncoder().encode(payloadJson)),
-        };
-        Object.assign(payload as Record<string, unknown>, proxyRequest);
-        return onPayloadResult;
-      },
-    } as const;
-
-    // 直接走流式 `streamSimple`，由下游（TA / secret proxy）按 SSE 协议返回分块。
-    return underlying(proxyModel as never, context as never, proxyOptions as never);
-  };
+  return createProviderSecretProxyWrapper({
+    baseStreamFn: underlying,
+    secretProxyUrl,
+    secretProxyKeyId: resolveSecretProxyKeyId(mergedParams),
+    resolveEndpointUrl: (model) => resolveEndpointUrl(model.baseUrl, mergedParams),
+    requestMethod: "Post",
+    apiKeyPlaceholder: MINIMAX_SECRET_PROXY_API_KEY_PLACEHOLDER,
+  });
 }

@@ -485,6 +485,10 @@
       "types": "./dist/plugin-sdk/secret-input.d.ts",
       "default": "./dist/plugin-sdk/secret-input.js"
     },
+    "./plugin-sdk/secret-proxy-ca": {
+      "types": "./dist/plugin-sdk/secret-proxy-ca.d.ts",
+      "default": "./dist/plugin-sdk/secret-proxy-ca.js"
+    },
     "./plugin-sdk/signal": {
       "types": "./dist/plugin-sdk/signal.d.ts",
       "default": "./dist/plugin-sdk/signal.js"

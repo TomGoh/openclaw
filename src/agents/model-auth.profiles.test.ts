@@ -286,6 +286,37 @@ describe("getApiKeyForModel", () => {
     );
   });
 
+  it("keeps generic provider secret-proxy placeholder profile when configured", async () => {
+    const resolved = await resolveApiKeyForProvider({
+      provider: "openai",
+      cfg: {
+        agents: {
+          defaults: {
+            models: {
+              "openai/gpt-5.4": {
+                params: {
+                  secretProxy: { url: "http://127.0.0.1:29030", keyId: 1 },
+                },
+              },
+            },
+          },
+        },
+      },
+      store: {
+        version: 1,
+        profiles: {
+          "openai:secret-proxy": {
+            type: "api_key",
+            provider: "openai",
+            key: "openclaw-secret-proxy:openai",
+          },
+        },
+      },
+    });
+    expect(resolved.profileId).toBe("openai:secret-proxy");
+    expect(resolved.apiKey).toBe("openclaw-secret-proxy:openai");
+  });
+
   it("hasAvailableAuthForProvider('google') accepts GOOGLE_API_KEY fallback", async () => {
     await withEnvAsync(
       {
