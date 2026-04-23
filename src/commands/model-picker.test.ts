@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
   applyMinimaxSecretProxyTripleToMinimaxModels,
+  applyProviderSecretProxyTripleToProviderModels,
   applyModelAllowlist,
   applyModelFallbacksFromSelection,
+  extractProviderSecretProxyTriple,
   extractMinimaxSecretProxyTriple,
   promptDefaultModel,
   promptModelAllowlist,
@@ -405,6 +407,60 @@ describe("MiniMax secret proxy + model allowlist", () => {
     const merged = applyMinimaxSecretProxyTripleToMinimaxModels(afterAllowlist, triple!);
     expect(merged.agents?.defaults?.models?.["minimax/MiniMax-M2.5"]?.params).toEqual(donor);
     expect(merged.agents?.defaults?.models?.["minimax/MiniMax-M2.7"]?.params).toEqual(donor);
+  });
+});
+
+describe("provider secret proxy helpers", () => {
+  it("extracts secretProxy from namespaced params on a non-minimax provider", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "openai/gpt-5.4": {
+              params: {
+                secretProxy: {
+                  url: "http://127.0.0.1:29030",
+                  keyId: 3,
+                  endpointUrl: "https://api.openai.com/v1/responses",
+                },
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    expect(extractProviderSecretProxyTriple(cfg, "openai")).toEqual({
+      secretProxyUrl: "http://127.0.0.1:29030",
+      secretProxyKeyId: 3,
+      secretProxyEndpointUrl: "https://api.openai.com/v1/responses",
+    });
+  });
+
+  it("applies a provider secretProxy triple to all provider/* entries", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "openai/gpt-5.4": {},
+            "openai/gpt-5.4-mini": {},
+            "minimax/MiniMax-M2.7": {},
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const merged = applyProviderSecretProxyTripleToProviderModels(cfg, "openai", {
+      secretProxyUrl: "http://127.0.0.1:29030",
+      secretProxyKeyId: 2,
+    });
+    expect(merged.agents?.defaults?.models?.["openai/gpt-5.4"]?.params).toEqual({
+      secretProxyUrl: "http://127.0.0.1:29030",
+      secretProxyKeyId: 2,
+    });
+    expect(merged.agents?.defaults?.models?.["openai/gpt-5.4-mini"]?.params).toEqual({
+      secretProxyUrl: "http://127.0.0.1:29030",
+      secretProxyKeyId: 2,
+    });
+    expect(merged.agents?.defaults?.models?.["minimax/MiniMax-M2.7"]?.params).toBeUndefined();
   });
 });
 

@@ -111,6 +111,7 @@
   "param-readers",
   "provider-zai-endpoint",
   "secret-input",
+  "secret-proxy-ca",
   "signal",
   "channel-status",
   "slack",

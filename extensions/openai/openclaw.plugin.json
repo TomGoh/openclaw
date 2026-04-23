@@ -27,6 +27,16 @@
       "cliFlag": "--openai-api-key",
       "cliOption": "--openai-api-key <key>",
       "cliDescription": "OpenAI API key"
+    },
+    {
+      "provider": "openai",
+      "method": "api-secret-proxy",
+      "choiceId": "openai-secret-proxy",
+      "choiceLabel": "OpenAI via Secret Proxy",
+      "choiceHint": "Route through secret proxy",
+      "groupId": "openai",
+      "groupLabel": "OpenAI",
+      "groupHint": "Codex OAuth + API key"
     }
   ],
   "configSchema": {

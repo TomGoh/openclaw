@@ -22,6 +22,7 @@ const MINIMAX_SECRET_PROXY_PARAM_KEYS = [
   "secretProxyUrl",
   "secretProxyKeyId",
   "secretProxyEndpointUrl",
+  "secretProxy",
 ] as const;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -87,6 +88,7 @@ export function stripMinimaxSecretProxyFromConfig(cfg: OpenClawConfig): OpenClaw
         (typeof pp.secretProxyUrl === "string" && pp.secretProxyUrl.trim() !== "") ||
         (typeof pp.secretProxyEndpointUrl === "string" &&
           pp.secretProxyEndpointUrl.trim() !== "") ||
+        (typeof pp.secretProxy === "object" && pp.secretProxy !== null) ||
         (pp.secretProxyKeyId !== undefined &&
           pp.secretProxyKeyId !== null &&
           (typeof pp.secretProxyKeyId === "number" || typeof pp.secretProxyKeyId === "string"));
@@ -99,6 +101,7 @@ export function stripMinimaxSecretProxyFromConfig(cfg: OpenClawConfig): OpenClaw
         secretProxyUrl: null,
         secretProxyKeyId: null,
         secretProxyEndpointUrl: null,
+        secretProxy: null,
       };
       newModels[key] = { ...entry, params: newParams };
     }
@@ -311,6 +314,11 @@ export function buildMinimaxTeeSecretProxyConfigPatch(
     secretProxyUrl: params.secretProxyUrl,
     secretProxyKeyId: params.secretProxyKeyId,
     secretProxyEndpointUrl,
+    secretProxy: {
+      url: params.secretProxyUrl,
+      keyId: params.secretProxyKeyId,
+      endpointUrl: secretProxyEndpointUrl,
+    },
   };
   const minimaxRefs = new Set<string>([
     modelRef,

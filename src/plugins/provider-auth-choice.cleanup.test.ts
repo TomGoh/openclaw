@@ -88,4 +88,40 @@ describe("runProviderPluginAuthMethod TEE plaintext cleanup", () => {
     expect(upsertAuthProfileMock).toHaveBeenCalled();
     expect(removePlaintextApiKeyProfilesForProviderMock).not.toHaveBeenCalled();
   });
+
+  it("cleans plaintext profiles for any provider secret-proxy placeholder", async () => {
+    const method: ProviderAuthMethod = {
+      id: "api-secret-proxy",
+      label: "OpenAI via Secret Proxy",
+      kind: "custom",
+      run: async () => ({
+        profiles: [
+          {
+            profileId: "openai:secret-proxy",
+            credential: {
+              type: "api_key",
+              provider: "openai",
+              key: "openclaw-secret-proxy:openai",
+            },
+          },
+        ],
+      }),
+    };
+
+    await runProviderPluginAuthMethod({
+      config: {},
+      runtime: {} as never,
+      prompter: { note: vi.fn(async () => {}) } as never,
+      method,
+      agentId: "main",
+      agentDir: "/tmp/openclaw-agent",
+      workspaceDir: "/tmp/workspace",
+    });
+
+    expect(removePlaintextApiKeyProfilesForProviderMock).toHaveBeenCalledWith({
+      provider: "openai",
+      keepProfileIds: ["openai:secret-proxy"],
+      agentDir: "/tmp/openclaw-agent",
+    });
+  });
 });

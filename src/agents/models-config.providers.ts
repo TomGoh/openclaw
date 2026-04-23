@@ -46,7 +46,7 @@ import {
   runProviderCatalog,
 } from "../plugins/provider-discovery.js";
 import {
-  MINIMAX_SECRET_PROXY_API_KEY_MARKER,
+  isSecretProxyApiKeyMarker,
   isNonSecretApiKeyMarker,
   resolveNonEnvSecretRefApiKeyMarker,
   resolveNonEnvSecretRefHeaderValueMarker,
@@ -260,7 +260,7 @@ function resolveApiKeyFromCredential(
       };
     }
     if (cred.key?.trim()) {
-      if (cred.key.trim() === MINIMAX_SECRET_PROXY_API_KEY_MARKER) {
+      if (isSecretProxyApiKeyMarker(cred.key, { providerId: cred.provider })) {
         return undefined;
       }
       return {

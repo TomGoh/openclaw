@@ -9,6 +9,7 @@ import {
   normalizeProviderId,
   resolveConfiguredModelRef,
 } from "../agents/model-selection.js";
+import { extractProviderSecretProxyTripleFromModelParams } from "../agents/secret-proxy-config.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveAgentModelPrimaryValue } from "../config/model-input.js";
 import { applyPrimaryModel } from "../plugins/provider-model-primary.js";
@@ -582,6 +583,13 @@ export function applyModelAllowlist(cfg: OpenClawConfig, models: string[]): Open
 export function extractMinimaxSecretProxyTriple(
   cfg: OpenClawConfig,
 ): Record<string, unknown> | undefined {
+  return extractProviderSecretProxyTriple(cfg, "minimax");
+}
+
+export function extractProviderSecretProxyTriple(
+  cfg: OpenClawConfig,
+  providerId: string,
+): Record<string, unknown> | undefined {
   const models = cfg.agents?.defaults?.models;
   if (!models || typeof models !== "object") {
     return undefined;
@@ -589,30 +597,17 @@ export function extractMinimaxSecretProxyTriple(
   const primaryRaw = resolveAgentModelPrimaryValue(cfg.agents?.defaults?.model) ?? "";
   const primary = primaryRaw.trim();
   const orderedKeys = [
-    ...(primary.startsWith("minimax/") ? [primary] : []),
-    "minimax/MiniMax-M2.7",
+    ...(primary.startsWith(`${providerId}/`) ? [primary] : []),
+    ...(providerId === "minimax" ? ["minimax/MiniMax-M2.7"] : []),
     ...Object.keys(models).filter((key) => key !== "minimax/MiniMax-M2.7" && key !== primary),
   ];
   for (const key of orderedKeys) {
-    if (!key.startsWith("minimax/")) {
+    if (!key.startsWith(`${providerId}/`)) {
       continue;
     }
-    const raw = models[key]?.params;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      continue;
-    }
-    const p = raw;
-    if (typeof p.secretProxyUrl === "string" && p.secretProxyUrl.trim()) {
-      const triple: Record<string, unknown> = {
-        secretProxyUrl: p.secretProxyUrl.trim(),
-      };
-      if (p.secretProxyKeyId !== undefined) {
-        triple.secretProxyKeyId = p.secretProxyKeyId;
-      }
-      if (typeof p.secretProxyEndpointUrl === "string" && p.secretProxyEndpointUrl.trim()) {
-        triple.secretProxyEndpointUrl = p.secretProxyEndpointUrl.trim();
-      }
-      return triple;
+    const triple = extractProviderSecretProxyTripleFromModelParams(models[key]?.params);
+    if (triple) {
+      return { ...triple };
     }
   }
   return undefined;
@@ -626,17 +621,25 @@ export function applyMinimaxSecretProxyTripleToMinimaxModels(
   cfg: OpenClawConfig,
   triple: Record<string, unknown>,
 ): OpenClawConfig {
+  return applyProviderSecretProxyTripleToProviderModels(cfg, "minimax", triple);
+}
+
+export function applyProviderSecretProxyTripleToProviderModels(
+  cfg: OpenClawConfig,
+  providerId: string,
+  triple: Record<string, unknown>,
+): OpenClawConfig {
   const defaults = cfg.agents?.defaults;
   const models = defaults?.models;
   if (!models || typeof models !== "object") {
     return cfg;
   }
-  const minimaxKeys = Object.keys(models).filter((key) => key.startsWith("minimax/"));
-  if (minimaxKeys.length === 0) {
+  const providerKeys = Object.keys(models).filter((key) => key.startsWith(`${providerId}/`));
+  if (providerKeys.length === 0) {
     return cfg;
   }
   const nextModels = { ...models };
-  for (const key of minimaxKeys) {
+  for (const key of providerKeys) {
     const prevEntry = nextModels[key] ?? {};
     const prevParams =
       typeof prevEntry.params === "object" &&

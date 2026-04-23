@@ -70,6 +70,11 @@ function resolveLiveModelCases(raw?: string): LiveModelCase[] {
 }
 
 describe("buildOpenAIProvider", () => {
+  it("registers secret-proxy auth method for OpenAI", () => {
+    const provider = buildOpenAIProvider();
+    expect(provider.auth.map((method) => method.id)).toContain("api-secret-proxy");
+  });
+
   it("resolves gpt-5.4 mini and nano from GPT-5 small-model templates", () => {
     const provider = buildOpenAIProvider();
     const registry = {
